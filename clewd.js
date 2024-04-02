@@ -180,6 +180,7 @@ let uuidOrg, curPrompt = {}, prevPrompt = {}, prevMessages = [], prevImpersonate
         FullColon: true,
         padtxt: "1000,1000,15000",
         xmlPlot: true,
+        SkipRestricted: true,
         Superfetch: true
     }
 };
@@ -278,11 +279,10 @@ const updateParams = res => {
     });
 /***************************** */
     const accErr = await checkResErr(accRes, false ,false); //await checkResErr(accRes);
-    if (accErr?.status === 403 && !/request/i.test(accErr?.message)) {
-        console.log(`[31mExpired![0m`);
+    if (accErr?.status === 403 && accErr?.message === 'Invalid authorization') {
+        console.log(`[31mInvalid![0m`);
         return CookieCleaner(percentage);
-    }
-    if (accErr?.status < 200 || accErr?.status >= 300) throw accErr;
+    } else if (accErr?.status < 200 || accErr?.status >= 300) throw accErr;
 /***************************** */
     const accInfo = (await accRes.json())?.find(item => item.capabilities.includes('chat')); //const accInfo = (await accRes.json())?.[0];
     if (!accInfo || accInfo.error) {
@@ -350,14 +350,14 @@ const updateParams = res => {
 /***************************** */
         if (Config.CookieArray?.length > 0) { //}
             console.log(`${'consumer_banned' === flagtype ? '[31mBanned' : '[35mRestricted'}![0m`);
-            return 'consumer_banned' === flagtype ? CookieCleaner(percentage) : CookieChanger.emit('ChangeCookie');
+            return 'consumer_banned' === flagtype ? CookieCleaner(percentage) : Config.Settings.SkipRestricted && CookieChanger.emit('ChangeCookie');
         }
     }
-    changing = false, invalidtime = 0;
     if (Config.Cookiecounter < 0) {
         console.log(`[progress]: [32m${percentage.toFixed(2)}%[0m\n[length]: [33m${Config.CookieArray.length}[0m\n`);
         return CookieChanger.emit('ChangeCookie');
     }
+    changing = false, invalidtime = 0;
 /***************************** */
     const convRes = await (Config.Settings.Superfetch ? Superfetch : fetch)(`${Config.rProxy || AI.end()}/api/organizations/${accInfo.uuid}/chat_conversations`, { //const convRes = await fetch(`${Config.rProxy || AI.end()}/api/organizations/${uuidOrg}/chat_conversations`, {
         method: 'GET',
@@ -423,13 +423,13 @@ const updateParams = res => {
                 try {
                     const body = JSON.parse(Buffer.concat(buffer).toString());
                     let {temperature} = body;
-                    temperature = Math.max(.1, Math.min(1, temperature));
+                    temperature = typeof temperature === 'number' ? Math.max(.1, Math.min(1, temperature)) : undefined; //temperature = Math.max(.1, Math.min(1, temperature));
                     let {messages} = body;
 /************************* */
                     const thirdKey = req.headers.authorization?.match(/(?<=3rdKey:).*/);
                     apiKey = thirdKey?.map(item => item.trim())[0].split(/ ?, ?/) || req.headers.authorization?.match(/sk-ant-api\d\d-[\w-]{86}-[\w-]{6}AA/g);
                     model = apiKey || Config.Settings.PassParams && /claude-(?!default)/.test(body.model) || isPro && AI.mdl().includes(body.model) ? body.model : cookieModel;
-                    let max_tokens_to_sample = body.max_tokens, stop_sequences = body.stop || [], top_p = body.top_p, top_k = body.top_k;
+                    let max_tokens_to_sample = body.max_tokens, stop_sequences = body.stop || [], top_p = typeof body.top_p === 'number' ? body.top_p : undefined, top_k = typeof body.top_k === 'number' ? body.top_k : undefined;
                     if (!apiKey && Config.ProxyPassword != '' && req.headers.authorization != 'Bearer ' + Config.ProxyPassword) {
                         throw Error('ProxyPassword Wrong');
                     } else if (!changing && !apiKey && (!Config.Settings.PassParams && !isPro && model != cookieModel || invalidtime > Config.CookieArray?.length)) {
@@ -663,7 +663,7 @@ const updateParams = res => {
                     apiKey && messagesAPI && (type = 'msg_api');
                     prompt = Config.Settings.xmlPlot ? xmlPlot(prompt, !/claude-(2\.[1-9]|[3-9])/.test(model)) : apiKey ? `\n\nHuman: ${genericFixes(prompt)}\n\nAssistant:` : genericFixes(prompt).trim();
                     if (Config.Settings.FullColon) if (/claude-(2\.(1-|[2-9])|[3-9])/.test(model)) {
-                        stop_sequences.push('\n\r\nHuman:', '\n\r\nAssistant:');
+                        stop_sequences.push('\n\nHuman:', '\n\nAssistant:', '\n\r\nHuman:', '\n\r\nAssistant:');
                         prompt = apiKey ? prompt.replace(/(?<!\n\nHuman:.*)\n\n(Assistant:)/gs, '\n\r\n$1').replace(/\n\n(Human:)(?!.*\n\nAssistant:)/gs, '\n\r\n$1') : prompt.replace(/\n\n(Human|Assistant):/g, '\n\r\n$1:');
                     } else prompt = apiKey ? prompt.replace(/(?<!\n\nHuman:.*)(\n\nAssistant):/gs, '$1：').replace(/(\n\nHuman):(?!.*\n\nAssistant:)/gs, '$1：') : prompt.replace(/\n\n(Human|Assistant):/g, '\n\n$1：');
                     prompt = padtxt(prompt);
@@ -679,9 +679,9 @@ const updateParams = res => {
                                 const rounds = prompt.split('\n\nHuman:');
                                 messages = rounds.slice(1).flatMap(round => {
                                     const turns = round.split('\n\nAssistant:');
-                                    return [{role: 'user', content: turns[0].trim()}].concat(turns.slice(1).flatMap(turn => [{role: 'assistant', content: turn.trim()}]))
+                                    return [{role: 'user', content: turns[0].trim()}].concat(turns.slice(1).flatMap(turn => [{role: 'assistant', content: turn.trim()}]));
                                 }).reduce((acc, current) => {
-                                    if (current.content) if (Config.Settings.FullColon && acc[acc.length - 1]?.role === current.role) {
+                                    if (Config.Settings.FullColon && acc.length > 0 && (acc[acc.length - 1].role === current.role || !acc[acc.length - 1].content || (current.role === 'user' && !current.content))) {
                                         acc[acc.length - 1].content += (current.role === 'user' ? '\n\r\nHuman:' : '\n\r\nAssistant:') + current.content;
                                     } else acc.push(current);
                                     return acc;
